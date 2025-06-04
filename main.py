@@ -7,13 +7,13 @@ mulai dari pemuatan dan penggabungan data, analisis data eksplorasi (EDA)
 dan pra-pemrosesan, hingga pelatihan, evaluasi, dan penyimpanan model.
 
 Alur Kerja:
-1.  **Pemuatan & Penggabungan Data**: Menjalankan logika dari `data_load_merge.py`.
+1.  **Pemuatan & Penggabungan Data**.
     - Input: File CSV mentah dari `dataset/data-raw/`.
     - Output: DataFrame gabungan di memori.
-2.  **EDA & Pra-pemrosesan**: Menjalankan logika dari `eda_prepo.py`.
+2.  **EDA & Pra-pemrosesan**.
     - Input: DataFrame gabungan dari langkah sebelumnya.
     - Output: DataFrame yang sudah bersih dan ternormalisasi di memori.
-3.  **Pemodelan Machine Learning**: Menjalankan logika dari `model_ml.py`.
+3.  **Pemodelan dan Evaluasi Machine Learning**.
     - Input: DataFrame yang sudah dipra-pemrosesan.
     - Output: Model machine learning yang telah dilatih dan disimpan dalam format .joblib
       serta hasil evaluasi yang dicetak ke konsol.

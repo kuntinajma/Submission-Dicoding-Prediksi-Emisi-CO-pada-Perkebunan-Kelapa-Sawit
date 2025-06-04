@@ -1,6 +1,4 @@
-
-
-# **Laporan Proyek Machine Learning \- Kunti Najma Jalia**
+﻿# **Laporan Proyek Machine Learning \- Kunti Najma Jalia**
 
 ## **Domain Proyek \- Prediksi Emisi CO₂ pada Perkebunan Kelapa Sawit**
 
@@ -79,9 +77,9 @@ Dataset yang digunakan dalam proyek ini terdiri dari dua sumber utama yang kemud
 **Sumber Data:**
 
 * Data CO2 dan Cuaca: Dataset diperoleh dari sensor IoT dari Eddy Covariance yang kemudian saya upload secara publik melalui platform Kaggle yang dapat diakses melalui link berikut [https://www.kaggle.com/datasets/kuntinajmajalia/emisi-karbon-perkebunan-kelapa-sawit/data](https://www.kaggle.com/datasets/kuntinajmajalia/emisi-karbon-perkebunan-kelapa-sawit/data)   
-* Data Gabungan Awal: `dataset/data-clean/data_output_collecting.csv` (hasil dari notebook `data-load-merge.ipynb`).  
-* Data Setelah EDA & Preprocessing Awal: `dataset/data-clean/data_eda_step1.csv` (hasil dari notebook `eda-prepo.ipynb`).  
-* Data Siap Model (setelah imputasi & scaling): `dataset/data-clean/data_scaled.csv` (hasil dari notebook `eda-prepo.ipynb`).
+* Data Gabungan Awal: `dataset/data-clean/data_output_collecting.csv`
+* Data Setelah EDA & Preprocessing Awal: `dataset/data-clean/data_eda_step1.csv`
+* Data Siap Model (setelah imputasi & scaling): `dataset/data-clean/data_scaled.csv`
 
 ### **Variabel-variabel pada dataset gabungan (`data_scaled.csv`) adalah sebagai berikut:**
 
@@ -96,7 +94,7 @@ Dataset yang digunakan dalam proyek ini terdiri dari dua sumber utama yang kemud
 
 ### **Exploratory Data Analysis (EDA)**
 
-Pada tahap EDA (dilakukan di notebook `eda-prepo.ipynb`), beberapa temuan penting meliputi:
+Pada tahap EDA, beberapa temuan penting meliputi:
 
 * **Struktur dan Tipe Data:** Dataset awal (`data_output_collecting.csv`) terdiri dari 20.160 baris dan 6 kolom. Kolom `timestamp` awalnya bertipe object dan kemudian dikonversi menjadi datetime.  
 * **Analisis Missing Value:**  
@@ -118,7 +116,7 @@ Pada tahap EDA (dilakukan di notebook `eda-prepo.ipynb`), beberapa temuan pentin
 
 Tahapan persiapan data dilakukan secara berurutan untuk menghasilkan dataset yang siap digunakan untuk pemodelan:
 
-1. **Penggabungan Data (Data Merging) (`data-load-merge.ipynb`):**  
+1. **Penggabungan Data (Data Merging):**  
 - **Proses:**  
 1. Semua file CSV CO2 dari `dataset/data-raw/co2` digabungkan. Kolom `timestamp` dikonversi ke datetime dan `co2` ke numerik.  
 2. Data CO2 di-sampling per menit menggunakan **modus** (nilai yang paling sering muncul) untuk setiap interval menit. Rentang waktu penuh per menit dibuat untuk memastikan tidak ada menit yang hilang. Hasilnya disimpan sebagai `dataset/data-clean/co2_per_menit.csv`.  
@@ -126,32 +124,32 @@ Tahapan persiapan data dilakukan secara berurutan untuk menghasilkan dataset yan
 4. Data cuaca di-sampling per menit untuk setiap interval menit (namun pada kasus diatas data cuaca sudah per-menit tinggal di filter saja) dan hasilnya disimpan sebagai `dataset/data-clean/cuaca_per_menit.csv`.  
 5. Data CO2 per menit dan data cuaca per menit digabungkan berdasarkan kolom `minute` (timestamp). Hasilnya disimpan sebagai `dataset/data-clean/data_output_collecting.csv`.  
 - **Alasan:** Mengkonsolidasikan data dari berbagai sumber menjadi satu dataset utama dan menyamakan frekuensi data ke interval per menit.  
-2. **Konversi Tipe Data dan Pembuatan Fitur Waktu (`eda-prepo.ipynb`):**  
+2. **Konversi Tipe Data dan Pembuatan Fitur Waktu:**  
 - **Proses:**  
 1. Kolom `timestamp` pada `data_output_collecting.csv` dikonversi ke format datetime.  
 2. Fitur `hour` (jam dalam sehari) dan `date` diekstrak dari kolom `timestamp`.  
 - **Alasan:** Tipe data datetime penting untuk analisis berbasis waktu dan ekstraksi fitur waktu dapat membantu model menangkap pola temporal.  
-3. **Penanganan Missing Values (`eda-prepo.ipynb`):**  
-   Analisis pada notebook `eda-prepo.ipynb` menunjukkan adanya *missing values* pada beberapa kolom, terutama pada kolom `co2` yang mencapai \~60%. Untuk mengatasi hal ini, dilakukan strategi pengisian nilai yang kosong. Metode yang diimplementasikan pada kode adalah forward fill (`ffill`) yang diikuti dengan backward fill (`bfill`) untuk semua kolom dalam DataFrame.  
+3. **Penanganan Missing Values:**  
+   Analisis pada notebook menunjukkan adanya *missing values* pada beberapa kolom, terutama pada kolom `co2` yang mencapai \~60%. Untuk mengatasi hal ini, dilakukan strategi pengisian nilai yang kosong. Metode yang diimplementasikan pada kode adalah forward fill (`ffill`) yang diikuti dengan backward fill (`bfill`) untuk semua kolom dalam DataFrame.  
 * `ffill()` (Forward Fill): Metode ini mengisi nilai yang hilang dengan menggunakan nilai valid terakhir yang diketahui sebelumnya dalam urutan data. Ini cocok untuk data deret waktu, dengan asumsi bahwa sebuah kondisi (misalnya level CO₂) akan tetap sama sampai pengukuran baru tercatat.  
 * `bfill()` (Backward Fill): Setelah `ffill`, jika masih ada nilai kosong di awal dataset (di mana belum ada nilai valid sebelumnya untuk melakukan `ffill`), `bfill` akan mengisinya dengan menggunakan nilai valid berikutnya dalam urutan data.  
   Implementasi di kode: `df_filled = df.ffill().bfill()`. Kombinasi ini memastikan tidak ada lagi nilai yang hilang di seluruh dataset, sehingga data siap untuk tahap pemodelan. Hasilnya disimpan di `dataset/data-clean/data_filled.csv`.  
-4. **Feature Scaling (Normalization) (`eda-prepo.ipynb`):**  
+4. **Feature Scaling (Normalization):**  
 - **Proses:** Semua fitur numerik yang akan digunakan dalam pemodelan (`co2`, `temperature`, `humidity`, `rainfall`, `pyrano`) dinormalisasi menggunakan `MinMaxScaler` dari Scikit-learn. Ini mengubah skala fitur sehingga nilainya berada di antara 0 dan 1\.  
 - **Alasan:** Normalisasi penting untuk algoritma yang sensitif terhadap skala fitur, seperti SVR, dan dapat membantu konvergensi model lebih cepat.  
-5. **Pembuatan Fitur Lag dan Target (`model-ml.ipynb`):**  
+5. **Pembuatan Fitur Lag dan Target:**  
 - **Proses:**  
 1. Dibuat kolom target untuk prediksi 1 menit ke depan (`co2_target_1min`) dan 1 jam ke depan (`co2_target_1hour`) dengan menggeser (`shift`) kolom `co2`.  
 2. Dibuat 10 fitur lag (`co2_lag_1` hingga `co2_lag_10`) dari nilai `co2` sebelumnya.  
 3. Baris dengan nilai NaN yang muncul akibat operasi `shift` dihapus.  
 - **Alasan:** Fitur lag membantu model memahami dependensi temporal dalam data CO2. Target yang digeser memungkinkan prediksi nilai di masa depan.  
-6. **Pembagian Data (Train-Test Split) (`model-ml.ipynb`):**  
+6. **Pembagian Data (Train-Test Split):**  
 - **Proses:** Dataset untuk prediksi 1 menit dan 1 jam masing-masing dibagi menjadi data latih (80%) dan data uji (20%). Pembagian dilakukan tanpa pengacakan (`shuffle=False`) untuk menjaga urutan waktu, yang krusial untuk data time series.  
 - **Alasan:** Untuk melatih model pada satu set data dan mengevaluasinya pada set data lain yang tidak terlihat sebelumnya, guna mendapatkan estimasi performa yang objektif.
 
 ## **Modeling**
 
-Pada tahap ini, beberapa algoritma *machine* learning untuk regresi akan dilatih dan dievaluasi guna menemukan model terbaik untuk memprediksi konsentrasi CO₂. Proses ini dilakukan dalam *notebook* `model-ml.ipynb` dan juga diimplementasikan dalam skrip `main.py`.
+Pada tahap ini, beberapa algoritma *machine* learning untuk regresi akan dilatih dan dievaluasi guna menemukan model terbaik untuk memprediksi konsentrasi CO₂. Proses ini dilakukan dalam *notebook* dan juga diimplementasikan dalam skrip `main.py`.
 
 Model yang digunakan adalah:
 
@@ -164,7 +162,7 @@ Untuk setiap model, pelatihan dan evaluasi dilakukan secara terpisah untuk dua s
 * Prediksi konsentrasi CO₂ untuk **1 menit ke depan**.  
 * Prediksi konsentrasi CO₂ untuk **1 jam (60 menit) ke depan**.
 
-Parameter default digunakan untuk setiap model pada iterasi awal ini (sesuai *notebook* `model-ml.ipynb` dan `main.py` yang menggunakan `n_estimators=100` untuk Random Forest dan XGBoost, dan kernel `rbf` untuk SVR).
+Parameter default digunakan untuk setiap model pada iterasi awal ini sesuai *notebook* dan `main.py` yang menggunakan `n_estimators=100` untuk Random Forest dan XGBoost, dan kernel `rbf` untuk SVR.
 
 ### **1\. Support Vector Regression (SVR)**
 
