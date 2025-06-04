@@ -1,616 +1,389 @@
 # -*- coding: utf-8 -*-
 """
-Skrip Gabungan untuk Model Prediksi CO2 (Revisi Lanjutan)
+main.py
 
-Skrip ini mengintegrasikan seluruh alur kerja mulai dari pemuatan dan penggabungan data,
-melalui analisis data eksploratif (EDA) dan pra-pemrosesan, hingga pelatihan
-model machine learning, evaluasi, dan penyimpanan.
+Script utama yang mengintegrasikan seluruh alur kerja machine learning,
+mulai dari pemuatan dan penggabungan data, analisis data eksplorasi (EDA)
+dan pra-pemrosesan, hingga pelatihan, evaluasi, dan penyimpanan model.
 
-Logika sampling data CO2, urutan kolom, dan normalisasi telah disesuaikan 
-agar identik dengan versi notebook untuk memastikan hasil yang konsisten.
-Visualisasi telah dikomentari untuk mempercepat pengujian.
+Alur Kerja:
+1.  **Pemuatan & Penggabungan Data**: Menjalankan logika dari `data_load_merge.py`.
+    - Input: File CSV mentah dari `dataset/data-raw/`.
+    - Output: DataFrame gabungan di memori.
+2.  **EDA & Pra-pemrosesan**: Menjalankan logika dari `eda_prepo.py`.
+    - Input: DataFrame gabungan dari langkah sebelumnya.
+    - Output: DataFrame yang sudah bersih dan ternormalisasi di memori.
+3.  **Pemodelan Machine Learning**: Menjalankan logika dari `model_ml.py`.
+    - Input: DataFrame yang sudah dipra-pemrosesan.
+    - Output: Model machine learning yang telah dilatih dan disimpan dalam format .joblib
+      serta hasil evaluasi yang dicetak ke konsol.
 """
 
-# ==============================================================================
-# 1. SETUP: IMPORT PUSTAKA
-# ==============================================================================
-# Pustaka umum untuk manipulasi data dan sistem
+# =============================================================================
+# BAGIAN 0: IMPORT SEMUA LIBRARY YANG DIBUTUHKAN
+# =============================================================================
 import os
 import pandas as pd
 import numpy as np
 import glob
-# 'statistics.mode' tidak lagi digunakan untuk menjaga konsistensi dengan notebook asli
-
-# Pustaka untuk visualisasi
+from statistics import mode
 import matplotlib.pyplot as plt
 import seaborn as sns
-
-# Pustaka untuk Machine Learning
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.model_selection import train_test_split
 from sklearn.svm import SVR
 from sklearn.ensemble import RandomForestRegressor
 import xgboost as xgb
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import joblib
 
-print("Pustaka berhasil diimpor.")
+# Nonaktifkan peringatan yang tidak relevan jika diperlukan
+import warnings
+warnings.filterwarnings('ignore', category=FutureWarning)
 
 
-# ==============================================================================
-# 2. PEMUATAN DATA, SAMPLING, DAN PENGGABUNGAN
-# ==============================================================================
-print("\n--- Memulai: 2. Pemuatan Data, Sampling, dan Penggabungan ---")
+# =============================================================================
+# BAGIAN 1: PEMUATAN DAN PENGGABUNGAN DATA (Logika dari data_load_merge.py)
+# =============================================================================
+def run_data_loading_and_merge():
+    """
+    Menggabungkan data mentah CO2 dan cuaca, melakukan resampling per menit,
+    dan menghasilkan satu DataFrame tunggal yang siap untuk pra-pemrosesan.
+    """
+    print("="*50)
+    print("MEMULAI TAHAP 1: Pemuatan dan Penggabungan Data")
+    print("="*50)
 
-# --- Langkah 2.1: Proses Data CO2 ---
-print("Memproses data CO2...")
-co2_folder_path = 'dataset/data-raw/co2'
-# Membuat direktori jika belum ada (untuk environment di mana direktori mungkin tidak ada)
-os.makedirs(co2_folder_path, exist_ok=True)
-# Menambahkan file CSV dummy jika direktori kosong untuk menghindari error saat pengujian
-if not glob.glob(os.path.join(co2_folder_path, "*.csv")):
-    dummy_co2_data = {'timestamp': pd.to_datetime(['2025-04-24 00:00:00', '2025-04-24 00:00:30']), 'co2': [400, 401]}
-    dummy_co2_df = pd.DataFrame(dummy_co2_data)
-    dummy_co2_df.to_csv(os.path.join(co2_folder_path, 'dummy_co2.csv'), index=False)
-    print(f"File CSV dummy 'dummy_co2.csv' dibuat di {co2_folder_path}")
+    # --- Membaca dan Menggabungkan Data CO2 ---
+    print("\n[1.1] Memproses data CO2...")
+    folder_path_co2 = 'dataset/data-raw/co2'
+    all_csv_files = glob.glob(os.path.join(folder_path_co2, "*.csv"))
+    df_co2 = pd.concat([pd.read_csv(f) for f in all_csv_files], ignore_index=True)
+    df_co2 = df_co2[['timestamp', 'co2']]
+    df_co2['timestamp'] = pd.to_datetime(df_co2['timestamp'], errors='coerce')
+    df_co2['co2'] = pd.to_numeric(df_co2['co2'], errors='coerce')
 
-all_co2_files = glob.glob(os.path.join(co2_folder_path, "*.csv"))
-if all_co2_files:
-    df_co2_list = []
-    for f in all_co2_files:
-        try:
-            df_temp = pd.read_csv(f)
-            if 'timestamp' in df_temp.columns and 'co2' in df_temp.columns:
-                 df_co2_list.append(df_temp[['timestamp', 'co2']])
-            else:
-                print(f"Peringatan: File {f} tidak memiliki kolom 'timestamp' atau 'co2'. Dilewati.")
-        except Exception as e:
-            print(f"Error membaca file {f}: {e}. Dilewati.")
+    # --- Sampling dan Data CO2 ---
+    print("[1.2] Melakukan resampling data CO2 per menit...")
+    df_co2['minute'] = df_co2['timestamp'].dt.floor('min')
+    minute_co2 = df_co2.groupby('minute')['co2'].agg(
+        lambda x: x.mode().iloc[0] if not x.mode().empty else np.nan
+    ).reset_index()
+    full_minutes = pd.date_range(
+        start=df_co2['minute'].min().floor('D'),
+        end=df_co2['minute'].max().ceil('D') - pd.Timedelta(minutes=1),
+        freq='1min'
+    )
+    full_minutes_df = pd.DataFrame({'minute': full_minutes})
+    co2_sampled = full_minutes_df.merge(minute_co2, on='minute', how='left')
 
-    if df_co2_list:
-        df_co2 = pd.concat(df_co2_list, ignore_index=True)
-        df_co2['timestamp'] = pd.to_datetime(df_co2['timestamp'], errors='coerce')
-        df_co2['co2'] = pd.to_numeric(df_co2['co2'], errors='coerce')
-        df_co2.dropna(subset=['timestamp', 'co2'], inplace=True) # Hapus baris jika timestamp atau co2 NaN setelah konversi
+    # --- Memuat dan Membersihkan Data Cuaca ---
+    print("[1.3] Memproses data cuaca...")
+    folder_path_weather = 'dataset/data-raw/cuaca'
+    file_list_weather = sorted(os.listdir(folder_path_weather))
+    df_list_weather = []
+    for file in file_list_weather:
+        if file.endswith('.csv'):
+            df = pd.read_csv(os.path.join(folder_path_weather, file))
+            df_list_weather.append(df)
+    df_weather = pd.concat(df_list_weather, ignore_index=True)
+    df_weather = df_weather.drop(['direction', 'angle', 'wind_speed'], axis=1)
+    df_weather['timestamp'] = pd.to_datetime(df_weather['timestamp'])
 
-        if not df_co2.empty:
-            df_co2['minute'] = df_co2['timestamp'].dt.floor('min')
-            
-            # Menggunakan metode .mode().iloc[0] dari Pandas agar sama persis dengan notebook asli.
-            minute_co2 = df_co2.groupby('minute')['co2'].agg(
-                lambda x: x.mode().iloc[0] if not x.mode().empty else np.nan
-            ).reset_index()
+    # --- Memfilter dan Merapikan Data Cuaca ---
+    print("[1.4] Melakukan filtering dan alignment data cuaca...")
+    start_date = '2025-04-24'
+    end_date = '2025-05-07'
+    filtered_weather = df_weather[(df_weather['timestamp'] >= start_date) & (df_weather['timestamp'] <= end_date)].copy()
+    full_range = pd.date_range(start=start_date + ' 00:00:00', end=end_date + ' 23:59:00', freq='min')
+    full_weather_df = pd.DataFrame({'timestamp': full_range})
+    weather_sampled = pd.merge(full_weather_df, filtered_weather, on='timestamp', how='left')
 
-            if not minute_co2.empty and 'minute' in minute_co2.columns and not minute_co2['minute'].isnull().all():
-                start_minute_co2 = minute_co2['minute'].min()
-                end_minute_co2 = minute_co2['minute'].max()
-                if pd.isna(start_minute_co2) or pd.isna(end_minute_co2):
-                    print("Peringatan: Tidak dapat menentukan rentang waktu untuk data CO2 karena nilai min/max adalah NaT.")
-                    start_minute_co2 = pd.to_datetime('2025-04-24 00:00:00')
-                    end_minute_co2 = pd.to_datetime('2025-05-07 23:59:00')
-
-                full_minutes_range = pd.date_range(
-                    start=start_minute_co2.floor('D'),
-                    end=end_minute_co2.ceil('D') - pd.Timedelta(minutes=1),
-                    freq='T' # 'T' adalah alias untuk 'min'
-                )
-                full_minutes_df = pd.DataFrame({'minute': full_minutes_range})
-                co2_sampled = pd.merge(full_minutes_df, minute_co2, on='minute', how='left')
-                print("Data CO2 di-sample per menit menggunakan metode Pandas (sesuai notebook).")
-            else:
-                print("Peringatan: Tidak ada data CO2 yang valid untuk di-sample setelah grouping.")
-                co2_sampled = pd.DataFrame(columns=['minute', 'co2'])
-        else:
-            print("Peringatan: DataFrame CO2 kosong setelah pembersihan awal.")
-            co2_sampled = pd.DataFrame(columns=['minute', 'co2'])
-    else:
-        print("Peringatan: Tidak ada file CO2 yang valid yang dapat dibaca.")
-        co2_sampled = pd.DataFrame(columns=['minute', 'co2'])
-else:
-    print(f"Peringatan: Tidak ada file CSV yang ditemukan di {co2_folder_path}.")
-    co2_sampled = pd.DataFrame(columns=['minute', 'co2'])
-
-
-# --- Langkah 2.2: Proses Data Cuaca ---
-print("Memproses data cuaca...")
-weather_folder_path = 'dataset/data-raw/cuaca'
-# Membuat direktori jika belum ada
-os.makedirs(weather_folder_path, exist_ok=True)
-# Menambahkan file CSV dummy jika direktori kosong
-if not glob.glob(os.path.join(weather_folder_path, "*.csv")):
-    dummy_weather_data = {
-        'timestamp': pd.to_datetime(['2025-04-24 00:00:00', '2025-04-24 00:01:00']),
-        'temperature': [25.0, 25.1], 'humidity': [80, 81], 'rainfall': [0,0], 'pyrano': [0,0],
-        'direction': [0,0], 'angle': [0,0], 'wind_speed': [0,0] # Kolom yang akan dihapus
-    }
-    dummy_weather_df = pd.DataFrame(dummy_weather_data)
-    dummy_weather_df.to_csv(os.path.join(weather_folder_path, 'dummy_weather.csv'), index=False)
-    print(f"File CSV dummy 'dummy_weather.csv' dibuat di {weather_folder_path}")
-
-all_weather_files = sorted([f for f in os.listdir(weather_folder_path) if f.endswith('.csv')])
-if all_weather_files:
-    df_weather_list = []
-    for f in all_weather_files:
-        try:
-            df_temp = pd.read_csv(os.path.join(weather_folder_path, f))
-            if 'timestamp' in df_temp.columns:
-                df_weather_list.append(df_temp)
-            else:
-                print(f"Peringatan: File {f} tidak memiliki kolom 'timestamp'. Dilewati.")
-        except Exception as e:
-            print(f"Error membaca file {f}: {e}. Dilewati.")
-
-    if df_weather_list:
-        df_weather = pd.concat(df_weather_list, ignore_index=True)
-        df_weather = df_weather.drop(columns=['direction', 'angle', 'wind_speed'], errors='ignore')
-        df_weather['timestamp'] = pd.to_datetime(df_weather['timestamp'], errors='coerce')
-        df_weather.dropna(subset=['timestamp'], inplace=True) # Hapus baris jika timestamp NaN
-
-        if not df_weather.empty:
-            # Sample data cuaca per menit
-            start_date_weather, end_date_weather = '2025-04-24', '2025-05-07'
-            full_weather_range = pd.date_range(start=f'{start_date_weather} 00:00:00', end=f'{end_date_weather} 23:59:00', freq='T')
-            full_weather_df = pd.DataFrame({'timestamp': full_weather_range})
-            # Pastikan kolom yang ada di df_weather sebelum merge
-            cols_to_merge = ['timestamp'] + [col for col in ['temperature', 'humidity', 'rainfall', 'pyrano'] if col in df_weather.columns]
-            weather_sampled = pd.merge(full_weather_df, df_weather[cols_to_merge], on='timestamp', how='left')
-            print("Data cuaca di-sample per menit.")
-        else:
-            print("Peringatan: DataFrame cuaca kosong setelah pembersihan awal.")
-            weather_sampled = pd.DataFrame({'timestamp': pd.date_range(start='2025-04-24', end='2025-05-07 23:59:00', freq='T')}) # Hanya timestamp
-    else:
-        print("Peringatan: Tidak ada file cuaca yang valid yang dapat dibaca.")
-        weather_sampled = pd.DataFrame({'timestamp': pd.date_range(start='2025-04-24', end='2025-05-07 23:59:00', freq='T')})
-else:
-    print(f"Peringatan: Tidak ada file CSV yang ditemukan di {weather_folder_path}.")
-    weather_sampled = pd.DataFrame({'timestamp': pd.date_range(start='2025-04-24', end='2025-05-07 23:59:00', freq='T')})
+    # --- Menggabungkan Data CO2 dan Cuaca ---
+    print("[1.5] Menggabungkan data CO2 dan cuaca...")
+    cuaca_df = weather_sampled
+    co2_df = co2_sampled
+    co2_df['minute'] = pd.to_datetime(co2_df['minute'])
+    cuaca_df['timestamp'] = pd.to_datetime(cuaca_df['timestamp'])
+    merged_df = pd.merge(co2_df, cuaca_df, left_on='minute', right_on='timestamp', how='left')
+    merged_df.drop(columns=['timestamp'], inplace=True)
+    merged_df.rename(columns={'minute': 'timestamp'}, inplace=True)
+    
+    # Menyimpan output final dari tahap ini untuk checkpointing
+    output_merged_path = 'dataset/data-clean/data_output_collecting.csv'
+    os.makedirs(os.path.dirname(output_merged_path), exist_ok=True)
+    merged_df.to_csv(output_merged_path, index=False)
+    print(f"-> Data gabungan berhasil disimpan di: {output_merged_path}")
+    print("\nTAHAP 1 SELESAI.")
+    
+    return merged_df
 
 
-# --- Langkah 2.3: Gabungkan Data CO2 dan Cuaca ---
-print("Menggabungkan data CO2 dan cuaca...")
-if not co2_sampled.empty and 'minute' in co2_sampled.columns:
-    co2_sampled.rename(columns={'minute': 'timestamp'}, inplace=True)
-    co2_sampled['timestamp'] = pd.to_datetime(co2_sampled['timestamp'])
-else:
-    print("Peringatan: co2_sampled kosong atau tidak memiliki kolom 'minute'. Membuat DataFrame co2_sampled kosong dengan kolom 'timestamp'.")
-    co2_sampled = pd.DataFrame(columns=['timestamp', 'co2']) 
+# =============================================================================
+# BAGIAN 2: EDA DAN PRA-PEMROSESAN (Logika dari eda_prepo.py)
+# =============================================================================
+def run_eda_and_preprocessing(input_df):
+    """
+    Melakukan analisis data eksplorasi, menangani missing values,
+    dan melakukan normalisasi data.
+    """
+    print("\n" + "="*50)
+    print("MEMULAI TAHAP 2: EDA dan Pra-pemrosesan")
+    print("="*50)
+    
+    df = input_df.copy()
 
-if 'timestamp' not in weather_sampled.columns:
-    print("Peringatan: weather_sampled tidak memiliki kolom 'timestamp'. Membuatnya.")
-    weather_sampled['timestamp'] = pd.date_range(start='2025-04-24', end='2025-05-07 23:59:00', freq='T')
-weather_sampled['timestamp'] = pd.to_datetime(weather_sampled['timestamp'])
+    # --- Konversi Tipe Data dan Inspeksi Awal ---
+    print("\n[2.1] Inspeksi data awal...")
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    print(f"Jumlah baris awal: {len(df)}")
+    print("Jumlah missing values awal per kolom:")
+    print(df.isnull().sum())
 
-merged_df_temp = pd.merge(weather_sampled, co2_sampled, on='timestamp', how='left')
-
-expected_columns_order = ['timestamp', 'co2', 'temperature', 'humidity', 'rainfall', 'pyrano']
-for col in expected_columns_order:
-    if col not in merged_df_temp.columns:
-        print(f"Peringatan: Kolom '{col}' tidak ada di merged_df_temp setelah merge. Menambahkan sebagai NaN.")
-        merged_df_temp[col] = np.nan 
-
-merged_df = merged_df_temp[expected_columns_order]
-
-print("Penggabungan selesai. Bentuk data gabungan:", merged_df.shape)
-if merged_df.empty:
-    print("Peringatan: DataFrame gabungan kosong. Periksa langkah pemrosesan data CO2 dan Cuaca.")
-    default_cols = ['timestamp', 'co2', 'temperature', 'humidity', 'rainfall', 'pyrano']
-    merged_df = pd.DataFrame(columns=default_cols)
-    merged_df['timestamp'] = pd.date_range(start='2025-04-24', end='2025-05-07 23:59:00', freq='T')
-    print(f"DataFrame gabungan default dibuat dengan bentuk: {merged_df.shape}")
-
-
-df = merged_df.copy() 
-print("--- Selesai: 2. Pemuatan Data ---")
-
-
-# ==============================================================================
-# 3. ANALISIS DATA EKSPLORATIF (EDA) & PRA-PEMROSESAN
-# ==============================================================================
-print("\n--- Memulai: 3. EDA & Pra-pemrosesan ---")
-
-# --- Langkah 3.1: Inspeksi Data Awal ---
-print("Struktur data awal (df dari langkah 2):") 
-if not df.empty:
-    df.info()
-else:
-    print("DataFrame df kosong. Tidak dapat menampilkan info.")
-
-
-# --- Langkah 3.2: Analisis Nilai yang Hilang ---
-print("\nNilai yang hilang per kolom (%):")
-if not df.empty:
-    print((df.isnull().sum() / len(df) * 100).round(2))
-else:
-    print("DataFrame df kosong. Tidak dapat menghitung nilai yang hilang.")
-
-
-if not df.empty:
-    # plt.figure(figsize=(12, 4))
+    # --- Visualisasi Pola Missing Values (Opsional, di-comment untuk eksekusi script) ---
+    # print("\n[2.2] Membuat heatmap missing values...")
+    # plt.figure(figsize=(15, 5))
     # sns.heatmap(df.isnull(), cbar=False, cmap='viridis')
-    # plt.title('Heatmap Nilai yang Hilang Sebelum Penanganan')
+    # plt.title('Heatmap Missing Values per Kolom')
     # plt.show()
-    print("Visualisasi heatmap nilai yang hilang dikomentari.")
-else:
-    print("Tidak dapat membuat heatmap nilai yang hilang karena DataFrame kosong.")
 
-# --- Langkah 3.3: Tangani Nilai yang Hilang ---
-if not df.empty:
-    df_filled = df.ffill().bfill() 
-    print("\nNilai yang hilang setelah ffill/bfill:")
-    print(df_filled.isnull().sum()) 
-else:
-    print("DataFrame df kosong. Penanganan nilai yang hilang dilewati.")
-    df_filled = df.copy() 
+    # --- Penanganan Missing Values ---
+    print("\n[2.2] Menangani missing values dengan ffill dan bfill...")
+    df_filled = df.ffill().bfill()
+    print("Jumlah missing values setelah penanganan:")
+    print(df_filled.isnull().sum())
 
-# --- Langkah 3.4: Analisis Distribusi dan Outlier ---
-print("Memvisualisasikan distribusi fitur dan outlier...")
-num_cols = ['co2', 'temperature', 'humidity', 'rainfall', 'pyrano'] 
-if not df_filled.empty:
-    for col in num_cols:
-        if col in df_filled.columns and not df_filled[col].isnull().all(): 
-            # plt.figure(figsize=(14, 4))
-            # plt.subplot(1, 2, 1)
-            # sns.histplot(df_filled[col].dropna(), kde=True, bins=30) 
-            # plt.title(f'Distribusi {col}')
-            # plt.subplot(1, 2, 2)
-            # sns.boxplot(x=df_filled[col].dropna()) 
-            # plt.title(f'Boxplot {col}')
-            # plt.tight_layout()
-            # plt.show()
-            print(f"Visualisasi distribusi dan boxplot untuk {col} dikomentari.")
-        else:
-            print(f"Peringatan: Kolom '{col}' tidak ada di df_filled atau semua nilainya NaN. Visualisasi dilewati.")
-else:
-    print("DataFrame df_filled kosong. Analisis distribusi dan outlier dilewati.")
+    # --- Deteksi dan Investigasi Outlier ---
+    print("\n[2.3] Investigasi outlier pada kolom CO2...")
+    # Mengisolasi outlier potensial (berdasarkan analisis di notebook)
+    outlier_time = pd.to_datetime('2025-05-02 01:15:00')
+    df_filled_indexed = df_filled.set_index('timestamp')
+    outlier_value = df_filled_indexed.loc[outlier_time, 'co2'] if outlier_time in df_filled_indexed.index else "Tidak ditemukan"
+    print(f"Nilai pada waktu outlier (2025-05-02 01:15:00): {outlier_value}")
+    print("Berdasarkan analisis notebook, outlier ini tidak ekstrem dan diputuskan untuk dipertahankan.")
 
-# --- Langkah 3.5: Analisis Korelasi ---
-print("Memvisualisasikan matriks korelasi fitur...")
-if not df_filled.empty:
-    numeric_cols_for_corr = [col for col in num_cols if col in df_filled.columns and pd.api.types.is_numeric_dtype(df_filled[col]) and not df_filled[col].isnull().all()]
-    if numeric_cols_for_corr:
-        # plt.figure(figsize=(8, 6))
-        correlation_matrix = df_filled[numeric_cols_for_corr].corr() 
-        # sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', fmt=".2f")
-        # plt.title('Matriks Korelasi Fitur')
-        # plt.show()
-        print("Visualisasi heatmap korelasi dikomentari.")
+    # --- Normalisasi Data ---
+    print("\n[2.4] Melakukan normalisasi data (Min-Max Scaling)...")
+    scaler = MinMaxScaler()
+    cols_to_scale = ['co2', 'temperature', 'humidity', 'rainfall', 'pyrano']
+    df_scaled = df_filled.copy()
+    
+    # Pastikan kolom timestamp tidak jadi index sebelum scaling
+    if 'timestamp' in df_scaled.columns:
+        df_scaled_data = df_scaled[cols_to_scale]
     else:
-        print("Peringatan: Tidak ada kolom numerik yang valid untuk analisis korelasi.")
-else:
-    print("DataFrame df_filled kosong. Analisis korelasi dilewati.")
+        df_scaled_data = df_scaled.reset_index()[cols_to_scale]
 
-# --- Langkah 3.6: Visualisasi Time Series ---
-print("Memvisualisasikan pola time series...")
-if not df_filled.empty and 'timestamp' in df_filled.columns:
-    if not pd.api.types.is_datetime64_any_dtype(df_filled['timestamp']):
-        df_filled['timestamp'] = pd.to_datetime(df_filled['timestamp'])
-        
-    df_time_indexed = df_filled.set_index('timestamp')
-    numeric_cols_for_plot = [col for col in num_cols if col in df_time_indexed.columns and pd.api.types.is_numeric_dtype(df_time_indexed[col]) and not df_time_indexed[col].isnull().all()]
-    if numeric_cols_for_plot:
-        # df_time_indexed[numeric_cols_for_plot].plot(subplots=True, figsize=(15, 10), title='Time Series Fitur')
-        # plt.xlabel('Timestamp')
-        # plt.tight_layout()
-        # plt.show()
-        print("Visualisasi time series fitur dikomentari.")
-    else:
-        print("Peringatan: Tidak ada kolom numerik yang valid untuk visualisasi time series.")
-else:
-    print("DataFrame df_filled kosong atau tidak memiliki kolom 'timestamp'. Visualisasi time series dilewati.")
-
-
-# --- Langkah 3.7: Normalisasi Data ---
-print("Normalisasi data menggunakan MinMaxScaler...")
-# --- PERUBAHAN KUNCI DI SINI: Definisi cols_to_scale dipindahkan ke atas ---
-cols_to_scale = ['co2', 'temperature', 'humidity', 'rainfall', 'pyrano']
-df_scaled_intermediate = df_filled.copy() 
-scalable_cols_in_df = [col for col in cols_to_scale if col in df_scaled_intermediate.columns and not df_scaled_intermediate[col].isnull().all()]
-
-if not df_scaled_intermediate.empty and scalable_cols_in_df:
-    if df_scaled_intermediate[scalable_cols_in_df].isnull().any().any():
-        print("Peringatan: NaN ditemukan di kolom yang akan di-scale SETELAH ffill/bfill. Ini tidak diharapkan.")
+    df_scaled[cols_to_scale] = scaler.fit_transform(df_scaled_data)
     
-    scaler_instance = MinMaxScaler()
-    df_scaled_intermediate[scalable_cols_in_df] = scaler_instance.fit_transform(df_scaled_intermediate[scalable_cols_in_df])
-    print("Kolom fitur telah dinormalisasi.")
+    # Jika timestamp adalah index, reset index agar kembali jadi kolom
+    if isinstance(df_scaled.index, pd.DatetimeIndex):
+       df_scaled = df_scaled.reset_index()
+
+    # Menyimpan output final dari tahap ini untuk checkpointing
+    output_scaled_path = 'dataset/data-clean/data_scaled.csv'
+    os.makedirs(os.path.dirname(output_scaled_path), exist_ok=True)
+    df_scaled.to_csv(output_scaled_path, index=False)
+    print(f"-> Data yang sudah dinormalisasi disimpan di: {output_scaled_path}")
+    print("\nTAHAP 2 SELESAI.")
+
+    return df_scaled
+
+
+# =============================================================================
+# BAGIAN 3: PEMODELAN MACHINE LEARNING (Logika dari model_ml.py)
+# =============================================================================
+def run_modeling(input_df):
+    """
+    Melakukan feature engineering, membagi data, melatih beberapa model regresi,
+    mengevaluasi, membandingkan, dan menyimpan model terbaik.
+    """
+    print("\n" + "="*50)
+    print("MEMULAI TAHAP 3: Pemodelan Machine Learning")
+    print("="*50)
     
-    for col in cols_to_scale:
-        if col not in scalable_cols_in_df: 
-            if col not in df_scaled_intermediate.columns:
-                print(f"Peringatan: Kolom '{col}' untuk scaling tidak ada di DataFrame. Membuat kolom dengan nilai default 0.0.")
-                df_scaled_intermediate[col] = 0.0 
-            elif df_scaled_intermediate[col].isnull().all(): 
-                print(f"Peringatan: Kolom '{col}' semua nilainya NaN setelah ffill/bfill. Diisi dengan 0.0 sebelum reset_index.")
-                df_scaled_intermediate[col] = 0.0
+    df = input_df.copy()
 
-    df_scaled = df_scaled_intermediate.reset_index() 
-    
-    print("Data ternormalisasi dan df_scaled.reset_index() diterapkan (5 baris pertama):")
-    print(df_scaled.head())
+    # --- Penyesuaian Indeks Waktu ---
+    print("\n[3.1] Menyiapkan data dan indeks waktu...")
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df = df.set_index('timestamp')
 
-elif df_scaled_intermediate.empty:
-    print("DataFrame df_filled kosong. Normalisasi dilewati.")
-    df_scaled = df_filled.copy() 
-    if not df_scaled.empty: 
-        df_scaled = df_scaled.reset_index()
-else: 
-    print("Tidak ada kolom yang valid untuk dinormalisasi.")
-    df_scaled = df_scaled_intermediate.copy() 
-    for col_to_add in cols_to_scale: # Menggunakan variabel yang berbeda untuk menghindari konflik
-        if col_to_add not in df_scaled.columns: 
-            df_scaled[col_to_add] = 0.0
-    if not df_scaled.empty: 
-        df_scaled = df_scaled.reset_index()
-# --- AKHIR PERUBAHAN ---
+    # --- Rekayasa Fitur (Feature Engineering) ---
+    print("[3.2] Melakukan rekayasa fitur (lag features)...")
+    target_column = 'co2'
+    exog_features = ['temperature', 'humidity', 'rainfall', 'pyrano']
+    df['co2_target_1min'] = df[target_column].shift(-1)
+    df['co2_target_1hour'] = df[target_column].shift(-60)
+    n_lags = 10
+    lag_cols = []
+    for i in range(1, n_lags + 1):
+        col_name = f'{target_column}_lag_{i}'
+        df[col_name] = df[target_column].shift(i)
+        lag_cols.append(col_name)
+    feature_columns = lag_cols + exog_features
 
-df_model_input = df_scaled.copy() 
-print("--- Selesai: 3. EDA & Pra-pemrosesan ---")
+    # --- Membersihkan dan Memisahkan Data Final ---
+    df_1min = df.dropna(subset=['co2_target_1min'] + feature_columns).copy()
+    X_1min_all = df_1min[feature_columns]
+    y_1min_all = df_1min['co2_target_1min']
+    df_1hour = df.dropna(subset=['co2_target_1hour'] + feature_columns).copy()
+    X_1hour_all = df_1hour[feature_columns]
+    y_1hour_all = df_1hour['co2_target_1hour']
 
-
-# ==============================================================================
-# 4. PEMODELAN MACHINE LEARNING
-# ==============================================================================
-print("\n--- Memulai: 4. Pemodelan Machine Learning ---")
-
-# --- Langkah 4.1: Penyesuaian Timestamp dan Indeks ---
-if not df_model_input.empty and 'timestamp' in df_model_input.columns:
-    if not pd.api.types.is_datetime64_any_dtype(df_model_input['timestamp']):
-        df_model_input['timestamp'] = pd.to_datetime(df_model_input['timestamp'])
-    df_model_input = df_model_input.set_index('timestamp')
-    print("Timestamp diatur sebagai indeks. Kolom 'index' tetap ada (sesuai notebook).")
-elif df_model_input.empty:
-    print("Peringatan: df_model_input kosong. Langkah pemodelan mungkin gagal.")
-    min_cols = ['index','timestamp', 'co2', 'temperature', 'humidity', 'rainfall', 'pyrano'] 
-    df_model_input = pd.DataFrame(columns=min_cols)
-    df_model_input['timestamp'] = pd.date_range(start='2025-04-24', end='2025-05-07 23:59:00', freq='T')
-    df_model_input['index'] = range(len(df_model_input)) 
-    for col in ['co2', 'temperature', 'humidity', 'rainfall', 'pyrano']:
-        df_model_input[col] = 0 
-    df_model_input = df_model_input.set_index('timestamp')
-    print("df_model_input default dibuat dengan kolom 'index'.")
-else: 
-    print("Peringatan: Kolom 'timestamp' tidak ditemukan di df_model_input.")
-    if 'index' not in df_model_input.columns and len(df_model_input.index) == len(df_model_input): 
-        df_model_input = df_model_input.reset_index() 
-
-# --- Langkah 4.2: Rekayasa Fitur ---
-print("Melakukan rekayasa fitur...")
-target_column = 'co2'
-exog_features = ['temperature', 'humidity', 'rainfall', 'pyrano'] 
-
-if target_column not in df_model_input.columns:
-    print(f"Peringatan: Kolom target '{target_column}' tidak ada. Membuatnya dengan nilai default 0.")
-    df_model_input[target_column] = 0.0 
-for col in exog_features:
-    if col not in df_model_input.columns:
-        print(f"Peringatan: Fitur eksogen '{col}' tidak ada. Membuatnya dengan nilai default 0.")
-        df_model_input[col] = 0.0
-
-df_model_input['co2_target_1min'] = df_model_input[target_column].shift(-1)
-df_model_input['co2_target_1hour'] = df_model_input[target_column].shift(-60)
-
-n_lags = 10
-lag_cols = []
-for i in range(1, n_lags + 1):
-    col_name = f'{target_column}_lag_{i}'
-    df_model_input[col_name] = df_model_input[target_column].shift(i)
-    lag_cols.append(col_name)
-
-feature_columns = lag_cols + exog_features 
-print(f"Fitur yang digunakan untuk pemodelan: {feature_columns}")
-
-cols_for_dropna_1min = ['co2_target_1min'] + feature_columns
-cols_for_dropna_1hour = ['co2_target_1hour'] + feature_columns
-
-missing_cols_1min = [col for col in cols_for_dropna_1min if col not in df_model_input.columns]
-if missing_cols_1min:
-    print(f"Peringatan: Kolom berikut hilang untuk dropna (1 menit): {missing_cols_1min}. Membuatnya dengan NaN.")
-    for col in missing_cols_1min: df_model_input[col] = np.nan
-
-missing_cols_1hour = [col for col in cols_for_dropna_1hour if col not in df_model_input.columns]
-if missing_cols_1hour:
-    print(f"Peringatan: Kolom berikut hilang untuk dropna (1 jam): {missing_cols_1hour}. Membuatnya dengan NaN.")
-    for col in missing_cols_1hour: df_model_input[col] = np.nan
-
-
-df_1min = df_model_input.dropna(subset=cols_for_dropna_1min).copy()
-actual_feature_columns_1min = [col for col in feature_columns if col in df_1min.columns]
-X_1min_all = df_1min[actual_feature_columns_1min] if not df_1min.empty and actual_feature_columns_1min else pd.DataFrame(columns=feature_columns)
-y_1min_all = df_1min['co2_target_1min'] if not df_1min.empty and 'co2_target_1min' in df_1min else pd.Series(dtype='float64')
-
-df_1hour = df_model_input.dropna(subset=cols_for_dropna_1hour).copy()
-actual_feature_columns_1hour = [col for col in feature_columns if col in df_1hour.columns]
-X_1hour_all = df_1hour[actual_feature_columns_1hour] if not df_1hour.empty and actual_feature_columns_1hour else pd.DataFrame(columns=feature_columns)
-y_1hour_all = df_1hour['co2_target_1hour'] if not df_1hour.empty and 'co2_target_1hour' in df_1hour else pd.Series(dtype='float64')
-
-
-print(f"Data siap untuk model 1 menit: {X_1min_all.shape}")
-print(f"Data siap untuk model 1 jam: {X_1hour_all.shape}")
-
-if X_1min_all.empty or y_1min_all.empty:
-    print("Peringatan: Tidak ada data yang tersisa untuk model 1 menit setelah rekayasa fitur dan dropna.")
-if X_1hour_all.empty or y_1hour_all.empty:
-    print("Peringatan: Tidak ada data yang tersisa untuk model 1 jam setelah rekayasa fitur dan dropna.")
-
-
-# --- Langkah 4.3: Pembagian Data (Latih/Uji) ---
-print("Membagi data menjadi set latih dan uji...")
-if not X_1min_all.empty and not y_1min_all.empty:
+    # --- Pembagian Data (Train-Test Split) ---
+    print("[3.3] Membagi data menjadi data latih dan uji...")
     X_train_1min, X_test_1min, y_train_1min, y_test_1min = train_test_split(
-        X_1min_all, y_1min_all, test_size=0.2, shuffle=False)
-else:
-    X_train_1min, X_test_1min, y_train_1min, y_test_1min = pd.DataFrame(), pd.DataFrame(), pd.Series(dtype='float64'), pd.Series(dtype='float64')
-
-if not X_1hour_all.empty and not y_1hour_all.empty:
+        X_1min_all, y_1min_all, test_size=0.2, shuffle=False
+    )
     X_train_1hour, X_test_1hour, y_train_1hour, y_test_1hour = train_test_split(
-        X_1hour_all, y_1hour_all, test_size=0.2, shuffle=False)
-else:
-    X_train_1hour, X_test_1hour, y_train_1hour, y_test_1hour = pd.DataFrame(), pd.DataFrame(), pd.Series(dtype='float64'), pd.Series(dtype='float64')
+        X_1hour_all, y_1hour_all, test_size=0.2, shuffle=False
+    )
 
-print(f"Pembagian Latih/Uji (1 menit): {len(X_train_1min)}/{len(X_test_1min)}")
-print(f"Pembagian Latih/Uji (1 jam): {len(X_train_1hour)}/{len(X_test_1hour)}")
+    # --- Persiapan Pelatihan dan Evaluasi ---
+    evaluation_results_storage = {"1_min": {}, "1_hour": {}}
+    trained_models_storage = {"1_min": {}, "1_hour": {}}
 
+    # Helper function untuk plotting
+    def plot_actual_vs_predicted(y_true, y_pred, model_name, horizon_tag, test_index):
+        plt.figure(figsize=(15, 6))
+        plt.plot(test_index, y_true, label='Nilai Aktual CO2', color='blue')
+        plt.plot(test_index, y_pred, label=f'Prediksi {model_name}', color='red', linestyle='--')
+        plt.title(f'Perbandingan Aktual vs Prediksi ({model_name}) - {horizon_tag}')
+        plt.xlabel('Timestamp')
+        plt.ylabel('Kadar CO2 (Scaled)')
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        # Non-interactive mode, save the plot instead of showing
+        plot_dir = "plots"
+        os.makedirs(plot_dir, exist_ok=True)
+        filename = f"{plot_dir}/plot_{model_name.replace(' ', '_')}_{horizon_tag.replace(' ', '_')}.png"
+        plt.savefig(filename)
+        print(f"-> Visualisasi disimpan di: {filename}")
+        plt.close() # Close the plot to free memory
 
-# --- Langkah 4.4: Pelatihan Model, Evaluasi, dan Perbandingan ---
-evaluation_results_storage = {"1_min": {}, "1_hour": {}}
-
-def plot_actual_vs_predicted(y_true, y_pred, model_name, horizon_tag, test_index):
-    print(f"Plot aktual vs prediksi untuk {model_name} ({horizon_tag}) dikomentari.")
-    pass
-
-
-def train_evaluate_models_set(X_train, y_train, X_test, y_test, horizon_tag):
-    models_definition = {
+    # --- Loop Pelatihan dan Evaluasi Model ---
+    models_to_train = {
         "SVM Regressor": SVR(kernel='rbf'),
         "RandomForest": RandomForestRegressor(random_state=42, n_estimators=100),
         "XGBoost": xgb.XGBRegressor(objective='reg:squarederror', random_state=42, n_estimators=100)
     }
-    
-    current_results = {}
-    
-    if X_train.empty or y_train.empty or X_test.empty or y_test.empty:
-        print(f"Data latih atau uji kosong untuk horizon {horizon_tag}. Pelatihan model dilewati.")
-        for name in models_definition.keys():
-            current_results[name] = {"MAE": np.nan, "MSE": np.nan, "RMSE": np.nan, "R2": np.nan}
-        return current_results
 
-    for name, model_instance in models_definition.items():
-        print(f"\nMelatih {name} untuk prediksi {horizon_tag}...")
-        try:
-            model_instance.fit(X_train, y_train)
+    datasets = {
+        "1 Menit": (X_train_1min, X_test_1min, y_train_1min, y_test_1min),
+        "1 Jam": (X_train_1hour, X_test_1hour, y_train_1hour, y_test_1hour)
+    }
+
+    storage_keys = {"1 Menit": "1_min", "1 Jam": "1_hour"}
+
+    for horizon_tag, (X_train, X_test, y_train, y_test) in datasets.items():
+        print(f"\n--- Memproses Prediksi Horizon: {horizon_tag} ---")
+        storage_key = storage_keys[horizon_tag]
+        
+        for model_name, model_instance in models_to_train.items():
+            print(f"\n[3.4] Melatih model: {model_name} untuk {horizon_tag}")
             
-            print(f"Mengevaluasi {name}...")
+            # Melatih model
+            model_instance.fit(X_train, y_train)
+            trained_models_storage[storage_key][model_name] = model_instance
+            
+            # Prediksi
             predictions = model_instance.predict(X_test)
             
+            # Evaluasi
             mae = mean_absolute_error(y_test, predictions)
             mse = mean_squared_error(y_test, predictions)
             rmse = np.sqrt(mse)
             r2 = r2_score(y_test, predictions)
             
-            current_results[name] = {"MAE": mae, "MSE": mse, "RMSE": rmse, "R2": r2}
+            # Simpan hasil
+            evaluation_results_storage[storage_key][model_name] = {
+                "MAE": mae, "MSE": mse, "RMSE": rmse, "R2": r2
+            }
             
-            print(f"Hasil untuk {name} ({horizon_tag}): MAE={mae:.4f}, MSE={mse:.4f}, RMSE={rmse:.4f}, R2={r2:.4f}")
-            plot_actual_vs_predicted(y_test, predictions, name, horizon_tag, X_test.index) 
-        except Exception as e:
-            print(f"Error saat melatih atau mengevaluasi {name} untuk {horizon_tag}: {e}")
-            current_results[name] = {"MAE": np.nan, "MSE": np.nan, "RMSE": np.nan, "R2": np.nan}
+            print(f"Hasil Evaluasi {model_name} ({horizon_tag}):")
+            print(f"MAE: {mae:.4f}, MSE: {mse:.4f}, RMSE: {rmse:.4f}, R2 Score: {r2:.4f}")
             
-    return current_results
+            # Visualisasi
+            plot_actual_vs_predicted(y_test, predictions, model_name, horizon_tag, X_test.index)
 
-print("\n--- Pelatihan dan Evaluasi untuk Horizon 1 Menit ---")
-if not X_train_1min.empty:
-    evaluation_results_storage["1_min"] = train_evaluate_models_set(X_train_1min, y_train_1min, X_test_1min, y_test_1min, "1 Menit")
-else:
-    print("Data latih untuk horizon 1 menit kosong. Pelatihan dilewati.")
-    evaluation_results_storage["1_min"] = {model_name: {"MAE": np.nan, "MSE": np.nan, "RMSE": np.nan, "R2": np.nan} for model_name in ["SVM Regressor", "RandomForest", "XGBoost"]}
+    # --- Perbandingan dan Pemilihan Model Final ---
+    print("\n[3.5] Membandingkan model dan memilih yang terbaik...")
 
-print("\n--- Pelatihan dan Evaluasi untuk Horizon 1 Jam ---")
-if not X_train_1hour.empty:
-    evaluation_results_storage["1_hour"] = train_evaluate_models_set(X_train_1hour, y_train_1hour, X_test_1hour, y_test_1hour, "1 Jam")
-else:
-    print("Data latih untuk horizon 1 jam kosong. Pelatihan dilewati.")
-    evaluation_results_storage["1_hour"] = {model_name: {"MAE": np.nan, "MSE": np.nan, "RMSE": np.nan, "R2": np.nan} for model_name in ["SVM Regressor", "RandomForest", "XGBoost"]}
-
-
-# --- Langkah 4.5: Bandingkan Model dan Pilih yang Terbaik ---
-def display_detailed_comparison(eval_results_dict, horizon_tag_display):
-    if not eval_results_dict:
-        print(f"Tidak ada hasil evaluasi untuk {horizon_tag_display}.")
-        return None
-    
-    eval_df = pd.DataFrame(eval_results_dict).T
-    
-    if eval_df.empty:
-        print(f"Tidak ada model yang dievaluasi untuk {horizon_tag_display}.")
-        return None
-
-    print(f"\n--- Perbandingan Model Keseluruhan untuk Horizon {horizon_tag_display} ---")
-    print(eval_df.to_string())
-    
-    eval_df_valid = eval_df.dropna(how='all', subset=["MAE", "MSE", "RMSE", "R2"])
-
-    if eval_df_valid.empty:
-        print(f"Tidak ada model yang berhasil dievaluasi (semua metrik NaN) untuk {horizon_tag_display}.")
-        return None
-
-    metrics_criteria_ranking = {
-        "R2": {"rank_ascending": False}, 
-        "MAE": {"rank_ascending": True},  
-        "MSE": {"rank_ascending": True},
-        "RMSE": {"rank_ascending": True}
-    }
-    
-    model_composite_scores = pd.Series(0.0, index=eval_df_valid.index) 
-    num_valid_models = len(eval_df_valid)
-    
-    for metric_name, config_ranking in metrics_criteria_ranking.items():
-        if metric_name in eval_df_valid.columns:
-            ranks = eval_df_valid[metric_name].rank(method='min', ascending=config_ranking["rank_ascending"], na_option='bottom')
-            scores_for_metric = num_valid_models - ranks + 1
-            model_composite_scores = model_composite_scores.add(scores_for_metric.fillna(0), fill_value=0)
+    # Helper function untuk perbandingan
+    def display_detailed_comparison(eval_results_dict, horizon_tag):
+        eval_df = pd.DataFrame(eval_results_dict).T
+        print(f"\n{'-'*20} Tabel Performa Model ({horizon_tag}) {'-'*20}")
+        print(eval_df[['MAE', 'MSE', 'RMSE', 'R2']].to_string())
         
-    print("\nSkor Komposit Model (lebih tinggi lebih baik):")
-    sorted_scores = model_composite_scores.sort_values(ascending=False)
-    print(sorted_scores.to_string())
-    
-    if not sorted_scores.empty:
-        best_overall_model_name_selected = sorted_scores.idxmax()
-        if sorted_scores.max() > 0:
-             print(f"-> Model Terbaik Keseluruhan untuk {horizon_tag_display}: {best_overall_model_name_selected}")
-             return best_overall_model_name_selected
-        else:
-            print(f"Tidak dapat menentukan model terbaik untuk {horizon_tag_display} karena semua skor nol atau negatif.")
-            return None
-    else:
-        print(f"Tidak dapat menentukan model terbaik untuk {horizon_tag_display} karena tidak ada skor komposit.")
-        return None
-
-best_model_1min_name_final = display_detailed_comparison(evaluation_results_storage["1_min"], "1 Menit")
-best_model_1hour_name_final = display_detailed_comparison(evaluation_results_storage["1_hour"], "1 Jam")
-
-
-# --- Langkah 4.6: Latih Ulang dan Simpan Model Terbaik ---
-print("\n--- Pelatihan Ulang dan Penyimpanan Model Final ---")
-
-model_save_dir_path = "saved_models"
-if not os.path.exists(model_save_dir_path):
-    os.makedirs(model_save_dir_path)
-    print(f"Direktori dibuat: {model_save_dir_path}")
-
-def retrain_and_save_final_model(model_name_to_save, X_all_data, y_all_data, horizon_tag_for_file):
-    if model_name_to_save is None:
-        print(f"Penyimpanan dilewati untuk horizon {horizon_tag_for_file} karena tidak ada model terbaik yang ditentukan.")
-        return
-
-    if X_all_data.empty or y_all_data.empty:
-        print(f"Data untuk pelatihan ulang model {model_name_to_save} ({horizon_tag_for_file}) kosong. Penyimpanan dilewati.")
-        return
-
-    print(f"Melatih ulang model final '{model_name_to_save}' untuk horizon {horizon_tag_for_file} pada semua data yang tersedia...")
-    
-    final_model_instance = None
-    if model_name_to_save == "SVM Regressor":
-        final_model_instance = SVR(kernel='rbf')
-    elif model_name_to_save == "RandomForest":
-        final_model_instance = RandomForestRegressor(random_state=42, n_estimators=100)
-    elif model_name_to_save == "XGBoost":
-        final_model_instance = xgb.XGBRegressor(objective='reg:squarederror', random_state=42, n_estimators=100)
-    else:
-        print(f"Error: Nama model tidak dikenal '{model_name_to_save}'.")
-        return
-
-    try:
-        final_model_instance.fit(X_all_data, y_all_data)
+        metrics_criteria = {
+            "MAE": {"rank_ascending": True}, "MSE": {"rank_ascending": True},
+            "RMSE": {"rank_ascending": True}, "R2": {"rank_ascending": False}
+        }
+        model_scores = pd.Series(0, index=eval_df.index)
+        num_models = len(eval_df)
+        for metric, criteria in metrics_criteria.items():
+            ranks = eval_df[metric].rank(method='min', ascending=criteria["rank_ascending"])
+            scores = num_models - ranks + 1
+            model_scores = model_scores.add(scores, fill_value=0)
         
-        model_filename_to_save = f"final_model_{model_name_to_save.replace(' ', '_').lower()}_{horizon_tag_for_file}.joblib"
-        model_full_path = os.path.join(model_save_dir_path, model_filename_to_save)
+        best_overall_model_name = model_scores.idxmax()
+        print(f"\nSkor Komposit Model ({horizon_tag}):\n{model_scores.sort_values(ascending=False).to_string()}")
+        print(f"\n-> Model Terbaik untuk {horizon_tag}: {best_overall_model_name}")
+        return best_overall_model_name
+
+    best_model_1min_name = display_detailed_comparison(evaluation_results_storage["1_min"], "1 Menit")
+    best_model_1hour_name = display_detailed_comparison(evaluation_results_storage["1_hour"], "1 Jam")
+    
+    # --- Pelatihan Ulang dan Penyimpanan Model Final ---
+    print("\n[3.6] Melatih ulang dan menyimpan model final terpilih...")
+    
+    model_save_dir = "saved_models"
+    os.makedirs(model_save_dir, exist_ok=True)
+
+    # Helper function untuk melatih ulang
+    def retrain_and_save_final_model(best_model_name, X_all, y_all, horizon_tag):
+        print(f"\nMelatih ulang {best_model_name} untuk {horizon_tag} menggunakan seluruh data...")
         
-        joblib.dump(final_model_instance, model_full_path)
-        print(f"Model berhasil disimpan ke: {model_full_path}")
-    except Exception as e:
-        print(f"Error saat melatih ulang atau menyimpan model {model_name_to_save} untuk {horizon_tag_for_file}: {e}")
+        if best_model_name == "SVM Regressor": final_model = SVR(kernel='rbf')
+        elif best_model_name == "RandomForest": final_model = RandomForestRegressor(random_state=42, n_estimators=100)
+        elif best_model_name == "XGBoost": final_model = xgb.XGBRegressor(objective='reg:squarederror', random_state=42, n_estimators=100)
+        
+        final_model.fit(X_all, y_all)
+        
+        model_filename = f"final_model_{best_model_name.replace(' ', '_').lower()}_{horizon_tag.replace(' ', '_').lower()}.joblib"
+        model_path = os.path.join(model_save_dir, model_filename)
+        joblib.dump(final_model, model_path)
+        print(f"-> Model final disimpan di: {model_path}")
 
-retrain_and_save_final_model(best_model_1min_name_final, X_1min_all, y_1min_all, "1_menit")
-retrain_and_save_final_model(best_model_1hour_name_final, X_1hour_all, y_1hour_all, "1_jam")
+    # Eksekusi pelatihan ulang
+    retrain_and_save_final_model(best_model_1min_name, X_1min_all, y_1min_all, "1 Menit")
+    retrain_and_save_final_model(best_model_1hour_name, X_1hour_all, y_1hour_all, "1 Jam")
+    
+    print("\nTAHAP 3 SELESAI.")
 
-print("\n--- Akhir Proses ---")
+
+# =============================================================================
+# BLOK EKSEKUSI UTAMA (MAIN)
+# =============================================================================
+if __name__ == "__main__":
+    print("==========================================================")
+    print("            MEMULAI ALUR KERJA FORECASTING CO2            ")
+    print("==========================================================")
+    
+    # Jalankan Tahap 1: Pemuatan Data
+    # Fungsi ini akan mengembalikan DataFrame gabungan
+    merged_data = run_data_loading_and_merge()
+    
+    # Jalankan Tahap 2: EDA dan Pra-pemrosesan
+    # Fungsi ini mengambil DataFrame dari tahap 1 dan mengembalikan DataFrame yang sudah dinormalisasi
+    scaled_data = run_eda_and_preprocessing(merged_data)
+    
+    # Jalankan Tahap 3: Pemodelan
+    # Fungsi ini mengambil DataFrame dari tahap 2 untuk melatih dan menyimpan model
+    run_modeling(scaled_data)
+    
+    print("\n==========================================================")
+    print("        SELURUH PROSES TELAH BERHASIL DISELESAIKAN        ")
+    print("==========================================================")
