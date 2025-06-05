@@ -24,14 +24,12 @@ Proses klarifikasi masalah dalam proyek ini melibatkan pemahaman mendalam terhad
 ### **Problem Statements**
 
 1. Bagaimana cara memprediksi secara akurat jumlah emisi gas CO2 yang dihasilkan oleh perkebunan kelapa sawit berdasarkan data historis kondisi lingkungan dan cuaca untuk interval waktu 1 menit dan 1 jam ke depan?  
-2. Faktor-faktor cuaca dan lingkungan apa saja yang paling signifikan mempengaruhi tingkat emisi CO2 di area perkebunan kelapa sawit?  
-3. Algoritma machine learning manakah (antara Support Vector Machine, Random Forest, dan XGBoost) yang memberikan performa terbaik dalam memprediksi emisi CO2 untuk interval prediksi 1 menit dan 1 jam?
+2. Algoritma machine learning manakah (antara Support Vector Machine, Random Forest, dan XGBoost) yang memberikan performa terbaik dalam memprediksi emisi CO2 untuk interval prediksi 1 menit dan 1 jam?
 
 ### **Goals**
 
-1. Mengembangkan model regresi machine learning yang mampu memprediksi tingkat emisi CO2 dengan tingkat akurasi yang dapat diterima (berdasarkan beberapa matriks evaluasi) untuk prediksi 1 menit dan 1 jam.  
-2. Mengidentifikasi dan menganalisis fitur-fitur (variabel cuaca dan lingkungan) yang memiliki kontribusi terbesar terhadap prediksi emisi CO2.  
-3. Mengevaluasi dan membandingkan kinerja model Support Vector Regression (SVR), Random Forest Regressor, dan XGBoost Regressor untuk menentukan model prediksi CO2 yang paling optimal untuk setiap interval prediksi 1 menit dan 1 jam.
+1. Mengembangkan model regresi machine learning yang mampu memprediksi tingkat emisi CO2 dengan tingkat akurasi yang dapat diterima (berdasarkan beberapa matriks evaluasi) untuk prediksi 1 menit dan 1 jam.   
+2. Mengevaluasi dan membandingkan kinerja model Support Vector Regression (SVR), Random Forest Regressor, dan XGBoost Regressor untuk menentukan model prediksi CO2 yang paling optimal untuk setiap interval prediksi 1 menit dan 1 jam.
 
 ### **Solution statements**
 
@@ -68,7 +66,7 @@ Untuk mencapai tujuan-tujuan di atas, tahapan solusi yang akan dilakukan dalam p
 - Menyimpan model terbaik yang telah dilatih sehingga dapat digunakan kembali di masa mendatang.  
 - Menarik kesimpulan berdasarkan hasil analisis dan evaluasi model, serta memberikan rekomendasi untuk implementasi praktis.
 
-Pendekatan ini diharapkan dapat menghasilkan model prediksi CO₂ yang robust dan akurat, serta memberikan pemahaman yang lebih mendalam mengenai faktor-faktor yang mempengaruhi emisi CO₂ di perkebunan kelapa sawit.
+Pendekatan ini diharapkan dapat menghasilkan model prediksi CO₂ yang akurat, serta memberikan pemahaman yang lebih mendalam mengenai faktor-faktor yang mempengaruhi emisi CO₂ di perkebunan kelapa sawit.
 
 ## **Data Understanding**
 
@@ -89,8 +87,6 @@ Dataset yang digunakan dalam proyek ini terdiri dari dua sumber utama yang kemud
 * **humidity**: Kelembaban relatif udara (telah dinormalisasi). Satuan: Persentase (%) (setelah normalisasi, nilainya antara 0-1). Tipe data: Numerik (float64).  
 * **rainfall**: Jumlah curah hujan (telah dinormalisasi). Satuan: milimeter (mm) (setelah normalisasi, nilainya antara 0-1). Tipe data: Numerik (float64).  
 * **pyrano**: Radiasi matahari (diukur oleh pyranometer, telah dinormalisasi). Satuan: Watt per meter persegi (W/m²) (setelah normalisasi, nilainya antara 0-1). Tipe data: Numerik (float64).  
-* **hour**: Jam dalam sehari saat pencatatan data (hasil ekstraksi dari timestamp). Tipe data: Numerik (int64, 0-23).  
-* **date**: Tanggal pencatatan data (hasil ekstraksi dari timestamp). Tipe data: Object (string).
 
 ### **Exploratory Data Analysis (EDA)**
 
@@ -126,8 +122,7 @@ Tahapan persiapan data dilakukan secara berurutan untuk menghasilkan dataset yan
 - **Alasan:** Mengkonsolidasikan data dari berbagai sumber menjadi satu dataset utama dan menyamakan frekuensi data ke interval per menit.  
 2. **Konversi Tipe Data dan Pembuatan Fitur Waktu:**  
 - **Proses:**  
-1. Kolom `timestamp` pada `data_output_collecting.csv` dikonversi ke format datetime.  
-2. Fitur `hour` (jam dalam sehari) dan `date` diekstrak dari kolom `timestamp`.  
+1. Kolom `timestamp` pada `data_output_collecting.csv` dikonversi ke format datetime.   
 - **Alasan:** Tipe data datetime penting untuk analisis berbasis waktu dan ekstraksi fitur waktu dapat membantu model menangkap pola temporal.  
 3. **Penanganan Missing Values:**  
    Analisis pada notebook menunjukkan adanya *missing values* pada beberapa kolom, terutama pada kolom `co2` yang mencapai \~60%. Untuk mengatasi hal ini, dilakukan strategi pengisian nilai yang kosong. Metode yang diimplementasikan pada kode adalah forward fill (`ffill`) yang diikuti dengan backward fill (`bfill`) untuk semua kolom dalam DataFrame.  
